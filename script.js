@@ -1,174 +1,184 @@
 /**
- * AeroSim Pro 4.0 Core Physics Engine
+ * AeroVortex Engine - Pure Vanilla JS
+ * Joukowski Conformal Mapping & Compressibility Physics
  */
 
-const C = {
+const Complex = {
     add: (a, b) => ({ r: a.r + b.r, i: a.i + b.i }),
     sub: (a, b) => ({ r: a.r - b.r, i: a.i - b.i }),
     mul: (a, b) => ({ r: a.r * b.r - a.i * b.i, i: a.r * b.i + a.i * b.r }),
-    div: (a, b) => { let d = b.r*b.r + b.i*b.i; return d===0 ? {r:0,i:0} : { r: (a.r*b.r + a.i*b.i)/d, i: (a.i*b.r - a.r*b.i)/d }; },
-    scale: (a, s) => ({ r: a.r * s, i: a.i * s }),
-    sqrt: (a) => { let r = Math.sqrt(a.r*a.r + a.i*a.i), ang = Math.atan2(a.i, a.r); return { r: Math.sqrt(r)*Math.cos(ang/2), i: Math.sqrt(r)*Math.sin(ang/2) }; },
-    abs: (a) => Math.sqrt(a.r*a.r + a.i*a.i)
-};
-
-const config = { a: 110, cx: 600, cy: 400, numLines: 32 };
-const state = { 
-    pitch: 5, alt: 10000, thick: 0.12, camber: 0.04, speed: 250, 
-    rho: 1.225, mach: 0, lift: 0, drag: 0, regime: 'LAMINAR'
-};
-
-const UI = {
-    in: { alt: document.getElementById('in-alt'), speed: document.getElementById('in-speed'), pitch: document.getElementById('in-pitch'), thick: document.getElementById('in-thick'), camber: document.getElementById('in-camber') },
-    val: { alt: document.getElementById('val-alt'), speed: document.getElementById('val-speed'), pitch: document.getElementById('val-pitch'), thick: document.getElementById('val-thick'), camber: document.getElementById('val-camber') },
-    hud: { mach: document.getElementById('hud-mach'), speed: document.getElementById('hud-speed'), lift: document.getElementById('hud-lift'), drag: document.getElementById('hud-drag'), aoa: document.getElementById('hud-aoa') },
-    status: document.getElementById('flight-status'),
-    airfoil: document.getElementById('airfoil-path'),
-    group: document.getElementById('airfoil-group'),
-    flow: document.getElementById('flow-layer'),
-    shock: document.getElementById('shockwave-layer'),
-    dragMetric: document.getElementById('drag-metric')
-};
-
-let flowPaths = [];
-let J = {};
-
-function init() {
-    for (let i = 0; i < config.numLines; i++) {
-        let p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        p.setAttribute('class', 'streamline');
-        p.style.strokeDasharray = "100, 150";
-        UI.flow.appendChild(p);
-        flowPaths.push(p);
+    div: (a, b) => {
+        const d = b.r * b.r + b.i * b.i;
+        return { r: (a.r * b.r + a.i * b.i) / d, i: (a.i * b.r - a.r * b.i) / d };
     }
-    Object.values(UI.in).forEach(el => el.addEventListener('input', calculatePhysics));
-    calculatePhysics();
-    requestAnimationFrame(renderLoop);
+};
+
+const canvas = document.getElementById('simCanvas');
+const ctx = canvas.getContext('2d');
+const stallWarning = document.getElementById('stall-warning');
+
+// 시뮬레이션 상태
+let state = {
+    mach: 0.3,
+    aoa: 5,
+    thickness: 1.15,
+    camber: 0.1,
+    time: 0
+};
+
+// UI 업데이트 및 동기화
+function syncInputs() {
+    state.mach = parseFloat(document.getElementById('input-mach').value);
+    state.aoa = parseFloat(document.getElementById('input-aoa').value);
+    state.thickness = parseFloat(document.getElementById('input-thick').value);
+    state.camber = parseFloat(document.getElementById('input-camber').value);
+
+    document.getElementById('val-mach').innerText = state.mach.toFixed(2);
+    document.getElementById('val-aoa-hud').innerText = state.aoa;
 }
 
-function calculatePhysics() {
-    state.alt = parseInt(UI.in.alt.value);
-    state.speed = parseInt(UI.in.speed.value);
-    state.pitch = parseFloat(UI.in.pitch.value);
-    state.thick = parseInt(UI.in.thick.value) / 100;
-    state.camber = parseInt(UI.in.camber.value) / 100;
-
-    const h = state.alt * 0.3048;
-    const temp = Math.max(288.15 - 0.0065 * h, 216.65);
-    state.rho = (101325 * Math.pow(288.15 / temp, -5.25588)) / (287.05 * temp);
-    
-    const speed_ms = state.speed * 0.514444;
-    state.mach = speed_ms / Math.sqrt(1.4 * 287.05 * temp);
-
-    const alpha = state.pitch * Math.PI / 180;
-    const mu_x = -config.a * state.thick * 0.8;
-    const mu_y = config.a * state.camber * 0.5;
-    J = { mu: { r: mu_x, i: mu_y }, R: Math.sqrt((config.a - mu_x)**2 + mu_y**2), alpha: alpha, V: 1.0 };
-    J.beta = Math.asin(mu_y / J.R);
-    J.Gamma = 4 * Math.PI * J.V * J.R * Math.sin(alpha + J.beta);
-
-    let cl = 2 * Math.PI * Math.sin(alpha + J.beta) * (1 + 0.77 * state.thick);
-    let cd = 0.015 + (state.thick * 0.12) + Math.pow(cl, 2) / (Math.PI * 6.5);
-
-    const critAOA = 15 + (state.thick * 40);
-    const isStalled = Math.abs(state.pitch) > critAOA;
-
-    if (state.mach < 0.8) {
-        cl /= Math.sqrt(1 - state.mach**2);
-        state.regime = isStalled ? 'STALLED' : 'LAMINAR';
-    } else if (state.mach < 1.2) {
-        cd += 0.05 * Math.pow((state.mach - 0.8)/0.4, 2);
-        state.regime = 'TRANSONIC';
-    } else {
-        cl = 4 * alpha / Math.sqrt(state.mach**2 - 1);
-        cd = (4 * alpha**2 + 4 * state.thick**2) / Math.sqrt(state.mach**2 - 1) + 0.02;
-        state.regime = 'SUPERSONIC';
-        state.beta_shock = Math.asin(1/state.mach) + (state.thick + Math.abs(alpha))/2;
-    }
-
-    state.lift = 0.5 * state.rho * Math.pow(speed_ms, 2) * 40 * cl;
-    state.drag = 0.5 * state.rho * Math.pow(speed_ms, 2) * 40 * cd;
-
-    updateUI();
-    drawAirfoil();
-    drawShockwaves();
-    calculateStreamlines();
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
 }
+window.addEventListener('resize', resize);
+resize();
 
-function updateUI() {
-    UI.val.alt.innerText = state.alt.toLocaleString() + ' ft';
-    UI.val.speed.innerText = state.speed + ' kts';
-    UI.val.pitch.innerText = state.pitch.toFixed(1) + '°';
-    UI.val.thick.innerText = (state.thick * 100).toFixed(0) + '%';
-    UI.val.camber.innerText = (state.camber * 100).toFixed(0) + '%';
-    UI.hud.mach.innerText = state.mach.toFixed(2);
-    UI.hud.speed.innerText = state.speed + ' KTS';
-    UI.hud.lift.innerText = Math.abs(Math.round(state.lift)).toLocaleString() + ' N';
-    UI.hud.drag.innerText = Math.round(state.drag).toLocaleString() + ' N';
-    UI.hud.aoa.innerText = state.pitch.toFixed(1) + '°';
-
-    UI.status.className = 'status-badge ' + (state.regime === 'STALLED' ? 'status-stall' : state.regime === 'SUPERSONIC' ? 'status-supersonic' : 'status-laminar');
-    UI.status.innerText = state.regime === 'STALLED' ? '⚠️ STALL' : state.regime === 'SUPERSONIC' ? '🚀 SUPERSONIC' : 'LAMINAR FLOW';
-    UI.airfoil.className.baseVal = state.regime === 'STALLED' ? 'stalled' : '';
+// Joukowski 변환 로직
+function transform(z) {
+    const invZ = Complex.div({ r: 1, i: 0 }, z);
+    return Complex.add(z, invZ);
 }
 
 function drawAirfoil() {
-    let pts = [];
-    for(let t=0; t<=Math.PI*2; t+=0.1) {
-        let zeta = { r: J.mu.r + J.R * Math.cos(t), i: J.mu.i + J.R * Math.sin(t) };
-        let z = C.add(zeta, C.div({ r: config.a * config.a, i: 0 }, zeta));
-        pts.push(`${z.r},${-z.i}`);
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    
+    // 에어포일 렌더링
+    ctx.beginPath();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2.5;
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = '#00f2ff';
+
+    const center = { r: -0.15, i: state.camber };
+    const radius = state.thickness;
+
+    for (let i = 0; i <= 100; i++) {
+        const theta = (i / 100) * Math.PI * 2;
+        const z = {
+            r: center.r + radius * Math.cos(theta),
+            i: center.i + radius * Math.sin(theta)
+        };
+        const mapped = transform(z);
+        
+        // 회전 행렬 적용 (AOA)
+        const angle = -state.aoa * (Math.PI / 180);
+        const rx = mapped.r * Math.cos(angle) - mapped.i * Math.sin(angle);
+        const ry = mapped.r * Math.sin(angle) + mapped.i * Math.cos(angle);
+
+        const px = rx * 100;
+        const py = -ry * 100;
+
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
     }
-    UI.airfoil.setAttribute('d', `M ${pts.join(' L ')} Z`);
-    UI.group.setAttribute('transform', `translate(${config.cx}, ${config.cy}) rotate(${-state.pitch})`);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
 }
 
-function drawShockwaves() {
-    UI.shock.innerHTML = '';
-    if (state.regime !== 'SUPERSONIC') return;
-    const le = { x: config.cx - config.a * 1.9, y: config.cy }; // Simplify LE
-    const drawShock = (angle) => {
-        const l = document.createElementNS("http://www.w3.org/2000/svg", "line");
-        l.setAttribute('x1', le.x); l.setAttribute('y1', le.y);
-        l.setAttribute('x2', le.x + 600 * Math.cos(angle));
-        l.setAttribute('y2', le.y + 600 * Math.sin(angle));
-        l.setAttribute('class', 'shockwave');
-        UI.shock.appendChild(l);
-    };
-    drawShock(-state.beta_shock); drawShock(state.beta_shock);
-}
+function drawFlowField() {
+    const isStalled = Math.abs(state.aoa) > 15;
+    const isSupersonic = state.mach >= 1.0;
+    stallWarning.style.display = isStalled ? 'block' : 'none';
 
-function calculateStreamlines() {
-    const dt = state.regime === 'SUPERSONIC' ? 4.0 : 6.0;
-    for(let i=0; i<config.numLines; i++) {
-        let y = (i - config.numLines/2) * 28;
-        let lp = { r: -700, i: y };
-        let path = "";
-        for(let s=0; s<150; s++) {
-            let v = { r: J.V, i: 0 };
-            if (!(state.regime === 'SUPERSONIC' && lp.r < -200)) {
-                let z2 = C.mul(lp, lp), a2 = { r: config.a**2, i: 0 };
-                let zeta = C.scale(C.add(lp, C.sqrt(C.sub(z2, C.scale(a2, 4)))), 0.5);
-                let zp = C.sub(zeta, J.mu);
-                if (C.abs(zp) < J.R) break;
-                let dW = C.add(C.sub({r:J.V,i:0}, C.div({r:J.V*J.R**2,i:0}, C.mul(zp,zp))), C.div({r:0,i:J.Gamma/(2*Math.PI)}, zp));
-                let dz = C.sub({r:1,i:0}, C.div(a2, C.mul(zeta,zeta)));
-                let res = C.div(dW, dz);
-                v = { r: res.r, i: -res.i };
+    const alphaRad = (state.aoa * Math.PI) / 180;
+    
+    // 양력/항력 물리 계산
+    let Cl = 0;
+    if (isSupersonic) {
+        // Ackeret Theory (Linearized Supersonic Flow)
+        Cl = (4 * alphaRad) / Math.sqrt(state.mach ** 2 - 1);
+    } else {
+        // Prandtl-Glauert Correction
+        const Cl0 = 2 * Math.PI * alphaRad;
+        Cl = Cl0 / Math.sqrt(Math.max(0.01, 1 - state.mach ** 2));
+    }
+
+    document.getElementById('val-lift').innerText = Math.abs(Cl * 80).toFixed(1);
+    document.getElementById('val-drag').innerText = (isSupersonic ? Cl * 0.45 : 0.03).toFixed(3);
+    document.getElementById('val-speed').innerText = Math.round(state.mach * 661);
+
+    // 유선 그리기
+    const rows = 30;
+    const gap = canvas.height / rows;
+    const flowSpeed = state.mach * 25;
+
+    for (let i = 0; i < rows; i++) {
+        ctx.beginPath();
+        ctx.strokeStyle = isSupersonic ? 'rgba(255, 183, 0, 0.3)' : 'rgba(0, 242, 255, 0.25)';
+        
+        let offsetX = (state.time * flowSpeed) % 80;
+        let yBase = i * gap;
+
+        for (let x = -80; x < canvas.width + 80; x += 40) {
+            let curX = x + offsetX;
+            let curY = yBase;
+
+            const dx = curX - canvas.width / 2;
+            const dy = curY - canvas.height / 2;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            // 유동 편향 로직
+            if (dist < 300) {
+                const influence = Math.exp(-dist / 150);
+                
+                // 초음속 정적 상류 (Mach Cone 외부)
+                if (isSupersonic && dx < -80) {
+                    // No deflection
+                } else {
+                    curY += Math.sin(alphaRad) * influence * 80;
+                    if (isStalled && dx > 20) {
+                        curY += Math.sin(state.time * 12 + i) * 20 * influence;
+                    }
+                }
             }
-            lp = C.add(lp, C.scale(v, dt));
-            let gx = lp.r + config.cx, gy = lp.i + config.cy;
-            path += (s === 0 ? "M " : " L ") + `${gx},${gy}`;
-            if (gx > 1200) break;
+
+            if (x === -80) ctx.moveTo(curX, curY);
+            else ctx.lineTo(curX, curY);
         }
-        flowPaths[i].setAttribute('d', path);
-        flowPaths[i].style.stroke = state.regime === 'SUPERSONIC' ? 'url(#flowSuper)' : (state.regime === 'STALLED' && i > 15 ? 'url(#flowStall)' : 'url(#flowSub)');
+        ctx.stroke();
+    }
+
+    // Mach Wave 시각화
+    if (isSupersonic) {
+        const mu = Math.asin(1 / state.mach);
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.setLineDash([10, 10]);
+        const originX = canvas.width / 2 - 110;
+        const originY = canvas.height / 2;
+        
+        ctx.moveTo(originX, originY);
+        ctx.lineTo(originX + 600, originY - 600 * Math.tan(mu));
+        ctx.moveTo(originX, originY);
+        ctx.lineTo(originX + 600, originY + 600 * Math.tan(mu));
+        ctx.stroke();
+        ctx.setLineDash([]);
     }
 }
 
-function renderLoop() {
-    if (state.regime === 'STALLED' || state.regime === 'SUPERSONIC') calculateStreamlines();
-    requestAnimationFrame(renderLoop);
+function loop() {
+    ctx.fillStyle = '#05070a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    syncInputs();
+    drawFlowField();
+    drawAirfoil();
+    
+    state.time += 0.04;
+    requestAnimationFrame(loop);
 }
 
-window.onload = init;
+loop();
