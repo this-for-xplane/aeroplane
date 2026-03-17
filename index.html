@@ -1,1 +1,85 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AeroSim Pro | Supersonic Lab</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
 
+<div class="top-hud">
+    <div class="hud-metric"><label>MACH</label><div class="value" id="hud-mach">0.00</div></div>
+    <div class="hud-metric"><label>SPEED</label><div class="value" id="hud-speed">250 KTS</div></div>
+    <div class="hud-metric"><label>LIFT</label><div class="value" id="hud-lift">0 N</div></div>
+    <div class="hud-metric" id="drag-metric"><label>DRAG</label><div class="value" id="hud-drag">0 N</div></div>
+    <div class="hud-metric"><label>AOA</label><div class="value" id="hud-aoa">0.0°</div></div>
+    <div class="status-badge status-laminar" id="flight-status">LAMINAR FLOW</div>
+</div>
+
+<div class="floating-controls">
+    <header>
+        <h1>AEROSIM PRO 4.0</h1>
+        <p>Supersonic Dynamics Engine</p>
+    </header>
+
+    <div class="slider-group">
+        <div class="slider-header">Altitude <span id="val-alt" class="val">10000 ft</span></div>
+        <input type="range" id="in-alt" min="0" max="60000" value="10000" step="1000">
+    </div>
+
+    <div class="slider-group">
+        <div class="slider-header">Airspeed <span id="val-speed" class="val">250 kts</span></div>
+        <input type="range" id="in-speed" min="0" max="2000" value="250" step="10">
+    </div>
+
+    <div class="slider-group">
+        <div class="slider-header">Pitch / AOA <span id="val-pitch" class="val">5°</span></div>
+        <input type="range" id="in-pitch" min="-45" max="45" value="5" step="0.5">
+    </div>
+
+    <div class="slider-group">
+        <div class="slider-header">Thickness <span id="val-thick" class="val">12%</span></div>
+        <input type="range" id="in-thick" min="1" max="30" value="12">
+    </div>
+
+    <div class="slider-group">
+        <div class="slider-header">Camber <span id="val-camber" class="val">4%</span></div>
+        <input type="range" id="in-camber" min="-20" max="30" value="4">
+    </div>
+
+    <button id="ai-btn">AI 유체역학 현상 분석 ✨</button>
+    <div id="ai-response"></div>
+</div>
+
+<svg id="airfoil-svg" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice">
+    <defs>
+        <linearGradient id="flowSub" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="rgba(0, 242, 255, 0)" />
+            <stop offset="50%" stop-color="rgba(0, 242, 255, 0.8)" />
+            <stop offset="100%" stop-color="rgba(0, 242, 255, 0)" />
+        </linearGradient>
+        <linearGradient id="flowStall" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="rgba(255, 77, 77, 0.1)" />
+            <stop offset="50%" stop-color="rgba(255, 77, 77, 0.9)" />
+            <stop offset="100%" stop-color="rgba(255, 77, 77, 0)" />
+        </linearGradient>
+        <linearGradient id="flowSuper" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="rgba(255, 183, 0, 0)" />
+            <stop offset="80%" stop-color="rgba(255, 183, 0, 1)" />
+            <stop offset="100%" stop-color="rgba(255, 183, 0, 0)" />
+        </linearGradient>
+    </defs>
+
+    <g id="flow-layer"></g>
+    <g id="shockwave-layer"></g>
+    <g id="airfoil-group">
+        <line id="airfoil-chord" x1="-220" y1="0" x2="220" y2="0"></line>
+        <path id="airfoil-path" d=""></path>
+    </g>
+</svg>
+
+<script src="script.js"></script>
+
+</body>
+</html>
